@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<finding uuid="test-uuid" ruleId="test-rule" application-name="Test App" application-id="test-app-id" vulnerability-title="Test Vulnerability on '/test' page">
+  <request method="GET" protocol="http" version="1.1" port="80" uri="/test" qs="param=test">
+    <headers>
+      <h name="Host" value="example.com"/>
+    </headers>
+    <parameters>
+      <p name="param" value="test"/>
+    </parameters>
+  </request>
+  <events>
+    <propagation-event objectId="event-1" time="1" thread="1" type="Creation" target="O">
+      <signature>test.Controller.method(String)</signature>
+      <args>
+        <arg tracked="true" hashCode="123">dGVzdA==</arg>
+      </args>
+      <object tracked="true" hashCode="456">dGVzdCBvYmplY3Q=</object>
+    </propagation-event>
+    <method-event objectId="event-2" time="2" thread="1" type="P2O" source="P" target="O">
+      <signature>test.Processor.process(String)</signature>
+      <args>
+        <arg tracked="true" hashCode="789">dGVzdCB2YWx1ZQ==</arg>
+      </args>
+      <object tracked="true" hashCode="101">cHJvY2Vzc2VkIHZhbHVl</object>
+    </method-event>
+    <tag-event objectId="event-3" time="3" thread="1" type="Trigger">
+      <signature>test.Sink.execute(String)</signature>
+      <args>
+        <arg tracked="true" hashCode="112">dGVzdCBleHBsb2l0</arg>
+      </args>
+      <taint-ranges>
+        <taint-range>
+          <tag>untrusted</tag>
+          <range>0:12</range>
+        </taint-range>
+      </taint-ranges>
+    </tag-event>
+  </events>
+</finding>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trace Viewer Node Count Test</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="header-left">
+                <h1>Node Count Test</h1>
+            </div>
+        </div>
+    </header>
+    
+    <div class="container" style="padding: 20px;">
+        <div id="trace-graph" style="width: 800px; height: 600px; border: 1px solid #ccc; margin-top: 20px;"></div>
+    </div>
+    
+    <!-- Load libraries -->
+    <script src="libs/d3.v7.min.js"></script>
+    <script src="libs/jszip.min.js"></script>
+    
+    <!-- Load application scripts first -->
+    <script src="js/trace-parser.js"></script>
+    <script src="js/graph-renderer.js"></script>
+    
+    <!-- Load test script after application scripts -->
+    <script src="test-node-count.js"></script>
+</body>
+</html>

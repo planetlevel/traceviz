@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<finding uuid="test-uuid" ruleId="test-rule" application-name="Test App" application-id="test-app-id" vulnerability-title="Test Vulnerability on '/test' page">
+  <request method="GET" protocol="http" version="1.1" port="80" uri="/test" qs="param=test">
+    <headers>
+      <h name="Host" value="example.com"/>
+    </headers>
+    <parameters>
+      <p name="param" value="test"/>
+    </parameters>
+  </request>
+  <events>
+    <propagation-event objectId="event-1" time="1" thread="1" type="Source">
+      <signature>test.Controller.method(String)</signature>
+    </propagation-event>
+    <propagation-event objectId="event-2" time="2" thread="1" type="Propagator">
+      <signature>test.Processor.process(String)</signature>
+    </propagation-event>
+    <propagation-event objectId="event-3" time="3" thread="1" type="Trigger">
+      <signature>test.Sink.execute(String)</signature>
+    </propagation-event>
+  </events>
+</finding>

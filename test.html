@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trace Viewer Test</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <h1>Trace Viewer Test</h1>
+    <button id="load-sample">Load Sample XML</button>
+    <div id="trace-graph" style="width: 800px; height: 600px; border: 1px solid #ccc;"></div>
+    
+    <!-- Load libraries -->
+    <script src="libs/d3.v7.min.js"></script>
+    <script src="libs/jszip.min.js"></script>
+    
+    <!-- Load application scripts -->
+    <script src="js/trace-parser.js"></script>
+    <script src="js/graph-renderer.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const traceParser = new TraceParser();
+            const graphRenderer = new GraphRenderer('trace-graph');
+            
+            document.getElementById('load-sample').addEventListener('click', function() {
+                fetch('/sample.xml')
+                    .then(response => response.text())
+                    .then(xmlContent => {
+                        console.log('XML content loaded, length:', xmlContent.length);
+                        
+                        try {
+                            // Parse the XML
+                            const traceData = traceParser.parseXmlContent(xmlContent);
+                            console.log('Trace data:', traceData);
+                            
+                            // Render the graph
+                            graphRenderer.render({
+                                nodes: traceData.nodes,
+                                edges: traceData.edges
+                            });
+                        } catch (error) {
+                            console.error('Error processing XML:', error);
+                            alert('Error processing XML: ' + error.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching XML:', error);
+                        alert('Error fetching XML: ' + error.message);
+                    });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,800 @@
+/**
+ * GraphRenderer - Renders the vulnerability trace as a directed acyclic graph (DAG)
+ */
+window.GraphRenderer = class GraphRenderer {
+    /**
+     * Convert internal event type to display type
+     * @param {string} type - Internal event type
+     * @returns {string} Display type
+     */
+    getDisplayType(type) {
+        if (!type) return 'Unknown';
+        
+        switch (type) {
+            case 'Propagator':
+            case 'P2O':
+            case 'O2P':
+            case 'P2P':
+            case 'O2R':
+            case 'P2R': // Added P2R to be displayed as Data Flow
+                return 'Data Flow';
+            case 'Creation':
+            case 'Source':
+                return 'Source';
+            case 'Trigger':
+                return 'Violation';
+            case 'http-request':
+                return 'HTTP Request';
+            case 'route':
+                return 'Route';
+            default:
+                return type;
+        }
+    }
+    
+    constructor(containerId) {
+        this.containerId = containerId;
+        this.svg = null;
+        this.simulation = null;
+        this.nodeElements = null;
+        this.linkElements = null;
+        this.data = null;
+        this.width = 0;
+        this.height = 0;
+        this.margin = { top: 180, right: 50, bottom: 50, left: 50 }; // Increased top margin from 120 to 180
+        this.nodeRadius = 18; // Increased by 50% from 12
+        this.onNodeClick = null;
+        this.forceRerender = false;
+        
+        // Add window resize event listener
+        window.addEventListener('resize', () => {
+            this.updateSize();
+        });
+    }
+
+    /**
+     * Initialize the SVG container
+     */
+    initializeSvg() {
+        const container = document.getElementById(this.containerId);
+        if (!container) throw new Error(`Container with id ${this.containerId} not found`);
+        
+        this.width = container.clientWidth;
+        this.height = container.clientHeight;
+        
+        // Remove any existing SVG
+        d3.select(`#${this.containerId} svg`).remove();
+        
+        // Create a zoom behavior that only affects the outer SVG, not individual elements
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 3])
+            .on("zoom", (event) => {
+                // Only apply zoom transformation to the group, not individual nodes
+                mainGroup.attr("transform", event.transform);
+                // Don't zoom the legend - keep it fixed size and position
+                legendGroup.attr("transform", 
+                    `translate(20, ${this.height - 150})`);
+            });
+        
+        // Create new SVG
+        const svg = d3.select(`#${this.containerId}`)
+            .append("svg")
+            .attr("width", this.width)
+            .attr("height", this.height)
+            .attr("viewBox", [0, 0, this.width, this.height])
+            .call(zoom); // Apply zoom behavior to SVG
+            
+        // Add a group to contain all elements with initial transform to center content
+        const mainGroup = svg.append("g");
+        
+        // Store the main group as our drawing surface
+        this.svg = mainGroup;
+        
+        // Add a fixed legend group that won't be affected by zoom
+        const legendGroup = svg.append("g")
+            .attr("class", "legend")
+            .attr("transform", `translate(20, ${this.height - 150})`);
+            
+        // Store the legend group for later access
+        this.legendGroup = legendGroup;
+    }
+
+    /**
+     * Render the vulnerability trace graph
+     * @param {Object} data - Object with nodes and edges arrays
+     */
+    render(data) {
+        this.data = data;
+        
+        console.log("Rendering graph with data:", data);
+        console.log("Nodes:", data.nodes.length, "Edges:", data.edges.length);
+        
+        this.initializeSvg();
+        this.createDagLayout(data.nodes, data.edges);
+        this.renderEdges(data.edges);
+        this.renderNodes(data.nodes);
+        this.renderLegend();
+    }
+    
+    /**
+     * Render the legend
+     */
+    renderLegend() {
+        // Define legend items
+        const legendData = [
+            { type: "HTTP Request", color: "#e74c3c", letter: "H" }, // Red
+            { type: "Route", color: "#f39c12", letter: "R" },        // Orange
+            { type: "Source", color: "#2ecc71", letter: "S" },       // Green
+            { type: "Data Flow", color: "#3498db", letter: "D" },    // Blue
+            { type: "Violation", color: "#c0392b", letter: "V" }     // Dark red
+        ];
+        
+        // Add legend title
+        this.legendGroup.append("text")
+            .attr("class", "legend-title")
+            .attr("x", 0)
+            .attr("y", 0)
+            .attr("font-size", "14px")
+            .attr("font-weight", "bold")
+            .text("Legend");
+            
+        // Add legend items
+        const legendItems = this.legendGroup.selectAll(".legend-item")
+            .data(legendData)
+            .enter()
+            .append("g")
+            .attr("class", "legend-item")
+            .attr("transform", (d, i) => `translate(15, ${35 + i * 18})`);
+            
+        // Add colored circles
+        legendItems.append("circle")
+            .attr("r", 7)
+            .attr("fill", d => d.color)
+            .attr("stroke", d => d3.color(d.color).darker())
+            .attr("stroke-width", 1);
+            
+        // Add letter inside circles
+        legendItems.append("text")
+            .attr("x", 0)
+            .attr("y", 3) // Small vertical adjustment
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
+            .attr("font-size", "8px")
+            .attr("font-weight", "bold")
+            .attr("fill", "white")
+            .text(d => d.letter);
+            
+        // Add text labels
+        legendItems.append("text")
+            .attr("x", 20)
+            .attr("y", 4)
+            .attr("font-size", "12px")
+            .text(d => d.type);
+    }
+    
+    /**
+     * Update the size of the SVG container and redraw
+     * Use this method when the container size changes
+     */
+    updateSize() {
+        if (!this.data) return;
+        
+        const container = document.getElementById(this.containerId);
+        if (!container) return;
+        
+        // Update dimensions
+        this.width = container.clientWidth;
+        this.height = container.clientHeight;
+        
+        // Update the existing SVG dimensions
+        d3.select(`#${this.containerId} svg`)
+            .attr("width", this.width)
+            .attr("height", this.height)
+            .attr("viewBox", [0, 0, this.width, this.height]);
+            
+        // Update legend position if it exists
+        if (this.legendGroup) {
+            this.legendGroup.attr("transform", `translate(20, ${this.height - 150})`);
+        }
+        
+        // Only re-render if needed
+        if (this.forceRerender) {
+            // Remove existing SVG
+            d3.select(`#${this.containerId} svg`).remove();
+            
+            // Re-render with current data
+            this.initializeSvg();
+            this.createDagLayout(this.data.nodes, this.data.edges);
+            this.renderEdges(this.data.edges);
+            this.renderNodes(this.data.nodes);
+            this.renderLegend();
+            
+            this.forceRerender = false;
+        }
+    }
+
+    /**
+     * Create a DAG layout for the nodes
+     * @param {Array} nodes - Array of node objects
+     * @param {Array} links - Array of edge objects
+     */
+    createDagLayout(nodes, links) {
+        // Create a map for faster node lookup
+        const nodeMap = {};
+        nodes.forEach(node => {
+            nodeMap[node.id] = node;
+            // Initialize position properties if they don't exist
+            node.x = node.x || 0;
+            node.y = node.y || 0;
+        });
+
+        // Create a directed graph representation for layout
+        const graph = {
+            nodes: new Map(),  // node id -> { children: [], parents: [], level: 0 }
+            roots: [],         // Nodes with no parents (sources)
+            maxLevel: 0,       // Maximum depth level
+            violationNodes: [] // Track violation nodes separately
+        };
+        
+        // Initialize graph with nodes and identify violation/trigger nodes
+        nodes.forEach(node => {
+            const isViolation = node.isTriggerEvent || (node.type === 'trace-event' && node.label === 'Violation');
+            
+            graph.nodes.set(node.id, {
+                id: node.id,
+                children: [],
+                parents: [],
+                level: 0,
+                node: node,
+                isViolation: isViolation
+            });
+            
+            // Add to violation nodes list if it's a violation/trigger
+            if (isViolation) {
+                graph.violationNodes.push(node.id);
+            }
+        });
+        
+        // Add edges to the graph
+        links.forEach(link => {
+            const sourceNode = graph.nodes.get(link.source);
+            const targetNode = graph.nodes.get(link.target);
+            
+            if (sourceNode && targetNode) {
+                sourceNode.children.push(targetNode.id);
+                targetNode.parents.push(sourceNode.id);
+            }
+        });
+        
+        // HTTP request is the only root node
+        graph.roots = ['request'];
+        
+        // Add Debug logging to check node count
+        console.log(`Total nodes in buildNodes input: ${nodes.length}`);
+        console.log(`Total nodes in graph.nodes: ${graph.nodes.size}`);
+        
+        // First, assign levels using breadth-first search
+        const visited = new Set();
+        const queue = [...graph.roots.map(id => ({ id, level: 0 }))];
+        
+        // Modified BFS to ensure all nodes are visited
+        while (queue.length > 0) {
+            const { id, level } = queue.shift();
+            
+            if (visited.has(id)) {
+                continue;
+            }
+            
+            visited.add(id);
+            const node = graph.nodes.get(id);
+            if (!node) continue;
+            
+            // Assign level to all nodes
+            node.level = level;
+            graph.maxLevel = Math.max(graph.maxLevel, level);
+            
+            // Add all children to queue with incremented level
+            node.children.forEach(childId => {
+                if (!visited.has(childId)) {
+                    queue.push({ id: childId, level: level + 1 });
+                }
+            });
+        }
+        
+        // Check for unvisited nodes and assign them levels
+        let unvisitedCount = 0;
+        graph.nodes.forEach((node, nodeId) => {
+            if (!visited.has(nodeId)) {
+                unvisitedCount++;
+                // Add to queue with incremental level
+                node.level = graph.maxLevel + 1;
+                visited.add(nodeId);
+                
+                // Process this node's children too
+                node.children.forEach(childId => {
+                    if (!visited.has(childId)) {
+                        const childNode = graph.nodes.get(childId);
+                        if (childNode) {
+                            childNode.level = node.level + 1;
+                            visited.add(childId);
+                            graph.maxLevel = Math.max(graph.maxLevel, childNode.level);
+                        }
+                    }
+                });
+                
+                graph.maxLevel = Math.max(graph.maxLevel, node.level);
+            }
+        });
+        
+        console.log(`Found ${unvisitedCount} unvisited nodes after initial BFS`);
+        
+        // Next, process violation nodes - make sure they appear below their immediate parent
+        graph.violationNodes.forEach(violationId => {
+            const violationNode = graph.nodes.get(violationId);
+            if (!violationNode) return;
+            
+            // Find the parent node(s)
+            if (violationNode.parents.length > 0) {
+                // Get parent with highest level (deepest in the graph)
+                const parentLevels = violationNode.parents.map(pid => {
+                    const parent = graph.nodes.get(pid);
+                    return parent ? parent.level : 0;
+                });
+                
+                const maxParentLevel = Math.max(...parentLevels);
+                
+                // Assign level one deeper than deepest parent
+                violationNode.level = maxParentLevel + 1;
+                graph.maxLevel = Math.max(graph.maxLevel, violationNode.level);
+            } else {
+                // If no parent, place at the end
+                violationNode.level = graph.maxLevel + 1;
+                graph.maxLevel = violationNode.level;
+            }
+        });
+        
+        // Calculate vertical spacing
+        const totalHeight = this.height - (this.margin.top + this.margin.bottom);
+        const nodeCount = nodes.length;
+        // Increased vertical spacing for larger nodes, but make it more compact
+        const verticalSpacing = Math.max(100, totalHeight / (nodeCount + 2));
+        
+        // Now position nodes based on their levels
+        const levelCounts = new Array(graph.maxLevel + 1).fill(0);
+        const levelPositions = new Array(graph.maxLevel + 1).fill(0);
+        
+        // Count nodes per level
+        graph.nodes.forEach(node => {
+            levelCounts[node.level]++;
+        });
+        
+        // Calculate starting Y position for each level with more compact spacing
+        levelPositions[0] = this.margin.top + verticalSpacing * 0.5; // Adjusted for increased top margin
+        
+        // Set positions with gradually increasing gaps for better visibility
+        for (let i = 1; i <= graph.maxLevel; i++) {
+            levelPositions[i] = levelPositions[i-1] + verticalSpacing * 0.7;
+        }
+        
+        // Position nodes by level with branch detection
+        const levelNodeCounts = new Array(graph.maxLevel + 1).fill(0);
+        const levelWidth = this.width * 0.75; // Increased from 0.7 to 0.75 for more horizontal spacing
+        
+        const alignmentX = this.width * 0.15; // Use the same X position for vertical alignment
+        
+        // Fixed layout for top nodes - HTTP at top, Route below it, first event below that
+        // Find request and route nodes
+        const requestNode = nodes.find(node => node.id === 'request');
+        const routeNode = nodes.find(node => node.id === 'route');
+        
+        // Find first event (not request or route)
+        const firstEvent = nodes.find(node => 
+            node.id !== 'request' && node.id !== 'route'
+        );
+        
+        // Position HTTP request at the top
+        if (requestNode) {
+            requestNode.x = alignmentX;
+            requestNode.y = this.margin.top;
+        }
+        
+        // Position Route below HTTP request
+        if (routeNode) {
+            routeNode.x = alignmentX;
+            routeNode.y = this.margin.top + verticalSpacing * 0.8;
+        }
+        
+        // Position first event below Route
+        if (firstEvent) {
+            firstEvent.x = alignmentX;
+            firstEvent.y = this.margin.top + verticalSpacing * 1.6;
+            
+            // Find the graph node for this first event
+            const firstEventGraphNode = graph.nodes.get(firstEvent.id);
+            if (firstEventGraphNode) {
+                // Make sure its level is 1 (immediately after route)
+                firstEventGraphNode.level = 1;
+            }
+        }
+        
+        // Adjust subsequent level positions
+        levelPositions[0] = this.margin.top; // HTTP request
+        levelPositions[1] = this.margin.top + verticalSpacing * 1.6; // First event
+        
+        // Re-calculate level counts after ensuring all nodes have levels
+        levelCounts.fill(0);
+        graph.nodes.forEach(node => {
+            levelCounts[node.level]++;
+        });
+        
+        console.log(`Level counts after assignment: ${levelCounts.join(', ')}`);
+        
+        // Position ALL nodes by level
+        // First, clear any existing positions for consistency
+        nodes.forEach(node => {
+            if (node.id !== 'request' && node.id !== 'route' && 
+                (!firstEvent || node.id !== firstEvent.id)) {
+                node.x = undefined;
+                node.y = undefined;
+            }
+        });
+        
+        // Now position ALL nodes
+        nodes.forEach(node => {
+            // Skip nodes that were already positioned (request, route, first event)
+            if ((node.id === 'request' && node.x !== undefined) || 
+                (node.id === 'route' && node.x !== undefined) || 
+                (firstEvent && node.id === firstEvent.id && node.x !== undefined)) {
+                return;
+            }
+            
+            const graphNode = graph.nodes.get(node.id);
+            if (!graphNode) {
+                console.warn(`No graph node found for node ${node.id}`);
+                return;
+            }
+            
+            const level = graphNode.level;
+            
+            // Calculate Y position based on level
+            if (node.id === 'request') {
+                node.y = this.margin.top;
+            } else if (node.id === 'route') {
+                node.y = this.margin.top + verticalSpacing * 0.8;
+            } else {
+                node.y = this.margin.top + verticalSpacing * (1.6 + (level - 1) * 0.7);
+            }
+            
+            // For horizontal positioning, use parent-child relationships when possible
+            if (graphNode.parents.length > 0 && node.id !== 'route') {
+                // Try to align with parent if possible
+                const parentId = graphNode.parents[0];
+                const parentNode = nodes.find(n => n.id === parentId);
+                
+                if (parentNode && parentNode.x === alignmentX) {
+                    // Vertically align with parent
+                    node.x = alignmentX;
+                } else {
+                    // Position based on level
+                    if (levelCounts[level] === 1) {
+                        // If only one node at this level, align with main column
+                        node.x = alignmentX;
+                    } else {
+                        // Multiple nodes at this level - distribute them
+                        const spacing = levelWidth / (levelCounts[level] + 1);
+                        node.x = alignmentX + (levelNodeCounts[level] + 1) * spacing * 0.8;
+                    }
+                }
+            } else {
+                // Nodes without parents (except request) or the route node
+                if (node.id === 'request' || node.id === 'route') {
+                    node.x = alignmentX; // Align special nodes
+                } else if (levelCounts[level] === 1) {
+                    // If only one node at this level, align with main column
+                    node.x = alignmentX;
+                } else {
+                    // Multiple nodes at this level
+                    const spacing = levelWidth / (levelCounts[level] + 1);
+                    node.x = alignmentX + (levelNodeCounts[level] + 1) * spacing * 0.8;
+                }
+            }
+            
+            // Increment counter for this level
+            levelNodeCounts[level]++;
+        });
+        
+        // Check for nodes without positions and assign defaults
+        const unpositionedNodes = nodes.filter(node => 
+            node.x === undefined || node.y === undefined
+        );
+        
+        if (unpositionedNodes.length > 0) {
+            console.warn(`Found ${unpositionedNodes.length} nodes without positions, assigning defaults`);
+            unpositionedNodes.forEach(node => {
+                if (node.x === undefined) node.x = this.width / 2;
+                if (node.y === undefined) node.y = this.height / 2;
+            });
+        }
+        
+        // Final count of nodes with positions for verification
+        console.log(`Total nodes with positions: ${nodes.filter(n => n.x !== undefined && n.y !== undefined).length}`);
+        console.log(`Total input nodes: ${nodes.length}`);
+        
+        // Special positioning for violation nodes - place them beneath their direct parent
+        graph.violationNodes.forEach(violationId => {
+            const violationNode = graph.nodes.get(violationId);
+            if (!violationNode || violationNode.parents.length === 0) return;
+            
+            const violationNodeObj = nodeMap[violationId];
+            
+            // Find parent with highest level
+            let parentId = violationNode.parents[0]; // Default to first parent
+            let highestLevel = 0;
+            
+            violationNode.parents.forEach(pid => {
+                const parent = graph.nodes.get(pid);
+                if (parent && parent.level > highestLevel) {
+                    highestLevel = parent.level;
+                    parentId = pid;
+                }
+            });
+            
+            // Get parent node object
+            const parentNode = nodeMap[parentId];
+            
+            if (parentNode) {
+                // Position violation directly beneath parent, but on the next level
+                violationNodeObj.x = parentNode.x;
+                
+                // Y position is based on the level we assigned earlier
+                violationNodeObj.y = levelPositions[violationNode.level];
+            }
+        });
+    }
+
+    /**
+     * Render the nodes of the graph
+     * @param {Array} nodes - Array of node objects
+     */
+    renderNodes(nodes) {
+        // Create a tooltip container (if not exists)
+        let tooltip = d3.select("body").select(".node-tooltip");
+        
+        if (tooltip.empty()) {
+            tooltip = d3.select("body").append("div")
+                .attr("class", "node-tooltip")
+                .style("opacity", 0)
+                .style("position", "absolute")
+                .style("padding", "10px")
+                .style("background", "var(--card-bg, #1e2433)")
+                .style("color", "var(--text-color, #e1e6ef)")
+                .style("border", "1px solid var(--border-color, #2c3548)")
+                .style("border-radius", "4px")
+                .style("pointer-events", "none")
+                .style("max-width", "350px")
+                .style("font-size", "12px")
+                .style("z-index", 1000);
+        }
+
+        // Create or update nodes
+        this.nodeElements = this.svg.selectAll(".node")
+            .data(nodes, d => d.id)
+            .enter()
+            .append("g")
+            .attr("class", "node")
+            .attr("transform", d => `translate(${d.x},${d.y})`);
+            
+        // Add node circles with different styles based on node type
+        this.nodeElements.append("circle")
+            .attr("r", d => this.nodeRadius)
+            .attr("class", d => {
+                // Add specific classes based on node type
+                if (d.type === 'http-request') return "http-request-node";
+                if (d.type === 'route') return "route-node";
+                if (d.type === 'trace-event') {
+                    if (d.isTriggerEvent) return "trace-event-node trigger-node";
+                    if (d.isSourceEvent) return "trace-event-node source-node";
+                    return "trace-event-node";
+                }
+                return "";
+            });
+            
+        // Add text labels for nodes (above the circle)
+        this.nodeElements.append("text")
+            .attr("class", "node-title")
+            .attr("dy", -this.nodeRadius - 10) // Position above the circle
+            .text(d => {
+                if (d.type === 'trace-event') {
+                    // Use event type (Source, Propagator, Violation) as title
+                    if (d.isTriggerEvent) return "Violation";
+                    if (d.isSourceEvent) return "Source";
+                    return "Propagator";
+                }
+                return this.getDisplayType(d.type);
+            });
+            
+        // Add method signature (middle line)
+        this.nodeElements.append("text")
+            .attr("class", "node-method")
+            .attr("dy", this.nodeRadius + 15) // Position below the circle
+            .text(d => {
+                // Show method name for trace events
+                if (d.type === 'trace-event' && d.methodSignature) {
+                    // Truncate long signatures
+                    const maxLen = 30;
+                    return d.methodSignature.length > maxLen ? 
+                        d.methodSignature.substring(0, maxLen) + '...' : 
+                        d.methodSignature;
+                }
+                // Show the URL for HTTP request
+                if (d.type === 'http-request') {
+                    const maxLen = 30;
+                    return d.methodSignature && d.methodSignature.length > maxLen ? 
+                        d.methodSignature.substring(0, maxLen) + '...' : 
+                        d.methodSignature || 'HTTP Request';
+                }
+                return '';
+            });
+            
+        // Add data flow info (bottom line) with taint highlighting
+        const dataElements = this.nodeElements.append("text")
+            .attr("class", "node-data")
+            .attr("dy", this.nodeRadius + 30); // Position further below
+            
+        // Add tooltip behavior
+        this.nodeElements
+            .on("mouseover", (event, d) => {
+                tooltip.transition()
+                    .duration(200)
+                    .style("opacity", .9);
+                    
+                let tooltipContent = `<div><strong>${this.getDisplayType(d.type === 'trace-event' ? d.label : d.type)}</strong></div>`;
+                
+                // Add method signature
+                if (d.methodSignature) {
+                    tooltipContent += `<div>${d.methodSignature}</div>`;
+                }
+                
+                // Add tainted data if present
+                if (d.taintedData) {
+                    tooltipContent += `<div>${d.taintedData}</div>`;
+                }
+                
+                tooltip.html(tooltipContent)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            })
+            .on("mouseout", () => {
+                tooltip.transition()
+                    .duration(500)
+                    .style("opacity", 0);
+            })
+            .on("click", (event, d) => {
+                if (this.onNodeClick) {
+                    this.onNodeClick(d);
+                }
+            });
+            
+        // Hide any loading indicators
+        d3.select(`#${this.containerId} .loading-indicator`).style("display", "none");
+    }
+
+    /**
+     * Set the node click handler
+     * @param {Function} handler - Function to call when a node is clicked
+     */
+    setNodeClickHandler(handler) {
+        this.onNodeClick = handler;
+    }
+
+    /**
+     * Render the edges of the graph
+     * @param {Array} edges - Array of edge objects
+     */
+    renderEdges(edges) {
+        // Create or update edges
+        this.linkElements = this.svg.selectAll(".link")
+            .data(edges)
+            .enter()
+            .append("path")
+            .attr("class", "flow-path")
+            .attr("marker-end", "url(#arrowhead)")
+            .attr("d", d => {
+                // Calculate path from source to target
+                const sourceNode = this.data.nodes.find(node => node.id === d.source);
+                const targetNode = this.data.nodes.find(node => node.id === d.target);
+                
+                if (!sourceNode || !targetNode) return "";
+                
+                // Get node coordinates
+                const sourceX = sourceNode.x;
+                const sourceY = sourceNode.y;
+                const targetX = targetNode.x;
+                const targetY = targetNode.y;
+                
+                // Calculate the vertical offset for the middle control point
+                const midY = (sourceY + targetY) / 2;
+                const verticalOffset = Math.min(80, Math.abs(targetY - sourceY) / 2);
+                
+                // Calculate a curve between them (using curve if nodes are at different vertical positions)
+                if (Math.abs(targetY - sourceY) > 5) {
+                    // For typical vertical relationships (source above target)
+                    if (targetY > sourceY) {
+                        // Move path start/end points to edge of circle
+                        const dx = targetX - sourceX;
+                        const dy = targetY - sourceY;
+                        const angle = Math.atan2(dy, dx);
+                        
+                        // Calculate circle intersection points
+                        const sourceRadius = this.nodeRadius;
+                        const targetRadius = this.nodeRadius;
+                        
+                        const sourceIntersectX = sourceX + Math.cos(angle) * sourceRadius;
+                        const sourceIntersectY = sourceY + Math.sin(angle) * sourceRadius;
+                        
+                        const targetIntersectX = targetX - Math.cos(angle) * targetRadius;
+                        const targetIntersectY = targetY - Math.sin(angle) * targetRadius;
+                        
+                        // Create an S-curve path
+                        return `M${sourceIntersectX},${sourceIntersectY} C${sourceX},${sourceY + verticalOffset} ${targetX},${targetY - verticalOffset} ${targetIntersectX},${targetIntersectY}`;
+                    } else {
+                        // For reverse relationships (target above source) - handle specially
+                        // Similar logic to above but with different control points
+                        const dx = targetX - sourceX;
+                        const dy = targetY - sourceY;
+                        const angle = Math.atan2(dy, dx);
+                        
+                        const sourceRadius = this.nodeRadius;
+                        const targetRadius = this.nodeRadius;
+                        
+                        // Calculate horizontal offset for smoother curves
+                        const horizontalOffset = Math.abs(targetX - sourceX) / 2;
+                        
+                        // Calculate intersection points
+                        const sourceIntersectX = sourceX + Math.cos(angle) * sourceRadius;
+                        const sourceIntersectY = sourceY + Math.sin(angle) * sourceRadius;
+                        
+                        const targetIntersectX = targetX - Math.cos(angle) * targetRadius;
+                        const targetIntersectY = targetY - Math.sin(angle) * targetRadius;
+                        
+                        // Create a curved path that avoids other nodes
+                        return `M${sourceIntersectX},${sourceIntersectY} C${sourceX + horizontalOffset},${sourceY} ${targetX - horizontalOffset},${targetY} ${targetIntersectX},${targetIntersectY}`;
+                    }
+                } else {
+                    // For horizontal relationships (nodes at similar vertical position)
+                    // Use a simpler curve
+                    const dx = targetX - sourceX;
+                    const dy = targetY - sourceY;
+                    const angle = Math.atan2(dy, dx);
+                    
+                    // Calculate circle intersection points
+                    const sourceRadius = this.nodeRadius;
+                    const targetRadius = this.nodeRadius;
+                    
+                    const sourceIntersectX = sourceX + Math.cos(angle) * sourceRadius;
+                    const sourceIntersectY = sourceY + Math.sin(angle) * sourceRadius;
+                    
+                    const targetIntersectX = targetX - Math.cos(angle) * targetRadius;
+                    const targetIntersectY = targetY - Math.sin(angle) * targetRadius;
+                    
+                    // Create a simple curve
+                    return `M${sourceIntersectX},${sourceIntersectY} Q${(sourceX + targetX) / 2},${midY + 20} ${targetIntersectX},${targetIntersectY}`;
+                }
+            });
+            
+        // Add arrowhead marker if not already defined
+        const defs = this.svg.append("defs");
+        
+        defs.append("marker")
+            .attr("id", "arrowhead")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 8)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("class", "arrowhead")
+            .attr("d", "M0,-5L10,0L0,5");
+    }
+};
