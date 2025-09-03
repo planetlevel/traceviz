@@ -31,14 +31,9 @@ git clone https://github.com/yourusername/traceviz.git
 cd traceviz
 ```
 
-2. Run the local development server (optional):
+2. Open your web browser and navigate to:
 ```
-node server.js
-```
-
-3. Open your web browser and navigate to:
-```
-http://localhost:3000
+file:///[path-to]traceviz/index.html
 ```
 
 ### Usage
