@@ -1,6 +1,8 @@
 # TraceViz - Vulnerability Trace Viewer
 
-A powerful browser-based visualization tool for analyzing vulnerability traces and data flow in applications. TraceViz renders vulnerability traces as interactive directed acyclic graphs (DAG) with support for both standard and Sankey diagram layouts.
+WARNING: This is a vibe coded experimental prototype!
+
+A browser-based visualization tool for analyzing vulnerability traces and data flow in applications. TraceViz renders vulnerability traces as interactive directed acyclic graphs (DAG) with support for both standard and Sankey diagram layouts.
 
 ## Features
 
@@ -21,14 +23,12 @@ A powerful browser-based visualization tool for analyzing vulnerability traces a
 ### Prerequisites
 
 - A modern web browser (Chrome, Firefox, Safari, Edge)
-- Node.js (optional, for running the local development server)
 
 ### Installation
 
 1. Clone this repository:
 ```
 git clone https://github.com/yourusername/traceviz.git
-cd traceviz
 ```
 
 2. Open your web browser and navigate to:
@@ -55,13 +55,6 @@ file:///[path-to]traceviz/index.html
    - **Blue (D)**: Data flow/propagation events
    - **Dark Red (V)**: Security violations detected
    - Tainted parameters are highlighted in red within node details
-
-## How It Works
-
-1. The tool parses XML trace files exported from Contrast Assess
-2. It extracts information about the vulnerability, HTTP request, and event propagation
-3. The trace is rendered as a DAG using D3.js, with a subway map style layout
-4. Nodes are interactive and show detailed information when clicked
 
 ## Project Structure
 
